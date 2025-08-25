@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FormiGo - Senderos Sociales</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2c3e50">
+</head>
+<body>
+    <div class="container">
+        <div id="map"></div>
+        <div class="controls">
+            <header>
+                <div class="logo">
+                    <span class="logo-icon">🐜</span>
+                    <h1>FormiGo</h1>
+                </div>
+                <button id="menu-btn" class="icon-btn">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </header>
+            
+            <div class="trail-info">
+                <p><strong>Tu sendero:</strong> <span id="trail-length">0</span> pasos</p>
+                <p><strong>Distancia:</strong> <span id="trail-distance">0.0</span> km</p>
+                <p><strong>Tiempo:</strong> <span id="trail-time">00:00:00</span></p>
+            </div>
+            
+            <div class="action-buttons">
+                <button id="tracking-btn" class="button start-btn">
+                    <i class="fas fa-play"></i> <span class="btn-text">Iniciar</span>
+                </button>
+                
+                <button id="save-btn" class="button secondary-btn" disabled>
+                    <i class="fas fa-save"></i> <span class="btn-text">Guardar</span>
+                </button>
+                
+                <button id="center-btn" class="button icon-btn">
+                    <i class="fas fa-location-arrow"></i>
+                </button>
+            </div>
+            
+            <div class="privacy-toggle">
+                <span>Sendero privado</span>
+                <label class="switch">
+                    <input type="checkbox" id="privacy-toggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <div class="additional-actions">
+                <button id="my-trails-btn" class="button">
+                    <i class="fas fa-list"></i> <span class="btn-text">Mis Senderos</span>
+                </button>
+                
+                <button id="import-export-btn" class="button">
+                    <i class="fas fa-exchange-alt"></i> <span class="btn-text">Compartir</span>
+                </button>
+                
+                <button id="settings-btn" class="button icon-btn">
+                    <i class="fas fa-cog"></i>
+                </button>
+            </div>
+            
+            <div class="status" id="status">
+                Presiona "Iniciar" para comenzar a registrar tu ruta
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Mis Senderos -->
+    <div id="trails-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Mis Senderos Guardados</h2>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="trails-list" class="trail-list">
+                    <!-- Los senderos se cargarán aquí dinámicamente -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Importar/Exportar -->
+    <div id="import-export-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Importar/Exportar Senderos</h2>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="import-export">
+                    <div class="export-section">
+                        <h3>Exportar Sendero</h3>
+                        <p>Selecciona un sendero para exportar:</p>
+                        <select id="export-select" class="code-area"></select>
+                        <textarea id="export-code" class="code-area" placeholder="El código aparecerá aquí..." readonly></textarea>
+                        <button id="copy-btn" class="button secondary-btn">
+                            <i class="fas fa-copy"></i> Copiar Código
+                        </button>
+                    </div>
+                    
+                    <div class="import-section">
+                        <h3>Importar Sendero</h3>
+                        <textarea id="import-code" class="code-area" placeholder="Pega aquí el código del sendero..."></textarea>
+                        <button id="import-btn" class="button">
+                            <i class="fas fa-file-import"></i> Importar Sendero
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de configuración -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Configuración</h2>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="setting-item">
+                    <label for="map-style">Estilo del mapa:</label>
+                    <select id="map-style">
+                        <option value="standard">Standard</option>
+                        <option value="satellite">Satélite</option>
+                        <option value="terrain">Terreno</option>
+                    </select>
+                </div>
+                
+                <div class="setting-item">
+                    <label for="distance-unit">Unidad de distancia:</label>
+                    <select id="distance-unit">
+                        <option value="km">Kilómetros</option>
+                        <option value="mi">Millas</option>
+                    </select>
+                </div>
+                
+                <div class="setting-item">
+                    <label for="accuracy-filter">Filtro de precisión (metros):</label>
+                    <input type="range" id="accuracy-filter" min="0" max="50" value="20">
+                    <span id="accuracy-value">20m</span>
+                </div>
+                
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="auto-save">
+                        Guardado automático al detener
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast de notificación -->
+    <div id="toast" class="toast"></div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
