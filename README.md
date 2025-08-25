@@ -1,5 +1,3 @@
-# FormiGo 🐜
-
 ![FormiGo Logo](logo_FormiGO.png)
 
 > Social trail mapping inspired by ant colony behavior
