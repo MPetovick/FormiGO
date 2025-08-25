@@ -29,7 +29,7 @@ FormiGo is a progressive web application that allows users to track, save, and s
 
 ### Installation
 
-No installation required! Simply visit [[FormiGO](https://mpetovick.github.io/FormiGO/)] (update with actual URL) to start using FormiGo.
+No installation required! Simply visit [[FormiGO](https://mpetovick.github.io/FormiGO/)].
 
 For offline use:
 1. Open the app in your browser
