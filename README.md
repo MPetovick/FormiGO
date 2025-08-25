@@ -66,8 +66,7 @@ formigo/
 ├── index.html      # Main application page
 ├── style.css       # Styles and responsive layout
 ├── app.js          # Application logic and functionality
-├── logo_FormiGO.png # Application logo
-└── manifest.json   # PWA configuration
+└── logo_FormiGO.png # Application logo
 ```
 
 ### Browser Support
