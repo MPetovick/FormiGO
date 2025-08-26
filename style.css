@@ -12,31 +12,39 @@
     --transition: all 0.3s ease;
 }
 
-/* Reset y estilos base */
+/* Reset y estilos base optimizados */
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
+/* Mejorar rendimiento de renderizado */
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background-color: #f5f5f5;
     color: var(--text-color);
     overflow: hidden;
     height: 100vh;
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    perspective: 1000;
 }
 
-/* Layout principal */
+/* Layout principal con contain para mejor rendimiento */
 .container {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    contain: layout style paint;
 }
 
 #map {
     flex: 1;
     z-index: 1;
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
 }
 
 .controls {
@@ -49,15 +57,19 @@ body {
     z-index: 2;
     overflow-y: auto;
     max-height: 45vh;
+    /* Mejorar rendimiento */
+    contain: content;
+    will-change: transform;
 }
 
-/* Header y logo */
+/* Header y logo optimizados */
 header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0 0 10px 0;
     border-bottom: 1px solid #eee;
+    contain: layout;
 }
 
 .logo {
@@ -68,9 +80,11 @@ header {
 
 .logo-icon {
     font-size: 24px;
+    /* Evitar layout thrashing */
+    will-change: transform;
 }
 
-/* Información del sendero */
+/* Información del sendero con contain */
 .trail-info {
     background-color: #f9f9f9;
     padding: 12px;
@@ -78,22 +92,27 @@ header {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
+    contain: content;
 }
 
 .trail-info p {
     margin: 0;
     font-size: 0.9rem;
+    /* Mejorar rendimiento de texto */
+    text-rendering: optimizeSpeed;
 }
 
-/* Botones y controles */
+/* Botones y controles optimizados */
 .action-buttons {
     display: flex;
     gap: 10px;
+    contain: layout;
 }
 
 .additional-actions {
     display: flex;
     gap: 10px;
+    contain: layout;
 }
 
 .button {
@@ -108,6 +127,13 @@ header {
     justify-content: center;
     gap: 8px;
     flex: 1;
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
+    backface-visibility: hidden;
+}
+
+.button:active {
+    transform: scale(0.98);
 }
 
 .icon-btn {
@@ -151,7 +177,7 @@ header {
     transform: none;
 }
 
-/* Toggle de privacidad */
+/* Toggle de privacidad optimizado */
 .privacy-toggle {
     display: flex;
     align-items: center;
@@ -159,6 +185,7 @@ header {
     padding: 12px;
     background-color: #f9f9f9;
     border-radius: var(--border-radius);
+    contain: content;
 }
 
 .switch {
@@ -184,6 +211,8 @@ header {
     background-color: #ccc;
     transition: var(--transition);
     border-radius: 24px;
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
 }
 
 .slider:before {
@@ -196,6 +225,8 @@ header {
     background-color: white;
     transition: var(--transition);
     border-radius: 50%;
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
 }
 
 input:checked + .slider {
@@ -213,9 +244,11 @@ input:checked + .slider:before {
     font-style: italic;
     color: var(--gray-color);
     font-size: 0.9rem;
+    /* Mejorar rendimiento */
+    text-rendering: optimizeSpeed;
 }
 
-/* Modales */
+/* Modales con mejor rendimiento */
 .modal {
     display: none;
     position: fixed;
@@ -228,6 +261,9 @@ input:checked + .slider:before {
     justify-content: center;
     align-items: center;
     padding: 20px;
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
 .modal-content {
@@ -239,6 +275,9 @@ input:checked + .slider:before {
     overflow: hidden;
     box-shadow: var(--box-shadow);
     animation: modalFadeIn 0.3s;
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
+    contain: content;
 }
 
 @keyframes modalFadeIn {
@@ -252,29 +291,36 @@ input:checked + .slider:before {
     align-items: center;
     padding: 20px;
     border-bottom: 1px solid #eee;
+    contain: layout;
 }
 
 .modal-body {
     padding: 20px;
     overflow-y: auto;
     max-height: 60vh;
+    /* Mejorar rendimiento de scroll */
+    -webkit-overflow-scrolling: touch;
+    contain: content;
 }
 
 .close {
     font-size: 24px;
     cursor: pointer;
     color: var(--gray-color);
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
 }
 
 .close:hover {
     color: var(--text-color);
 }
 
-/* Lista de senderos */
+/* Lista de senderos con virtualización */
 .trail-list {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    contain: content;
 }
 
 .trail-item {
@@ -285,6 +331,9 @@ input:checked + .slider:before {
     justify-content: space-between;
     align-items: center;
     transition: var(--transition);
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
+    contain: layout;
 }
 
 .trail-item:hover {
@@ -299,6 +348,7 @@ input:checked + .slider:before {
 .trail-actions {
     display: flex;
     gap: 8px;
+    contain: layout;
 }
 
 .trail-btn {
@@ -308,6 +358,8 @@ input:checked + .slider:before {
     cursor: pointer;
     font-size: 0.8rem;
     transition: var(--transition);
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
 }
 
 .view-btn {
@@ -358,6 +410,8 @@ input:checked + .slider:before {
     border-radius: var(--border-radius);
     font-family: monospace;
     resize: vertical;
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
 }
 
 /* Configuración */
@@ -378,12 +432,12 @@ input:checked + .slider:before {
     border-radius: var(--border-radius);
 }
 
-/* Toast de notificación */
+/* Toast de notificación optimizado */
 .toast {
     position: fixed;
     bottom: 20px;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) translateZ(0);
     background-color: #333;
     color: white;
     padding: 12px 20px;
@@ -391,13 +445,24 @@ input:checked + .slider:before {
     z-index: 1001;
     opacity: 0;
     transition: opacity 0.3s;
+    /* Mejorar rendimiento */
+    backface-visibility: hidden;
+    will-change: opacity, transform;
 }
 
 .toast.show {
     opacity: 1;
 }
 
-/* Estilos responsivos */
+.toast.error {
+    background-color: var(--danger-color);
+}
+
+.toast.success {
+    background-color: var(--secondary-color);
+}
+
+/* Estilos responsivos optimizados */
 @media (min-width: 768px) {
     .container {
         flex-direction: row;
@@ -431,6 +496,12 @@ input:checked + .slider:before {
     .trail-info {
         grid-template-columns: 1fr;
     }
+    
+    /* Mejorar rendimiento en móviles */
+    .modal-content {
+        margin: 10px;
+        width: calc(100% - 20px);
+    }
 }
 
 /* Mejoras de accesibilidad */
@@ -439,11 +510,17 @@ input:checked + .slider:before {
         transition: none !important;
         animation: none !important;
     }
+    
+    .button:hover {
+        transform: none !important;
+    }
 }
 
-/* Estilos para el mapa */
+/* Estilos para el mapa optimizados */
 .leaflet-popup-content {
     margin: 12px;
+    /* Mejorar rendimiento */
+    transform: translateZ(0);
 }
 
 .leaflet-popup-content h3 {
@@ -454,7 +531,7 @@ input:checked + .slider:before {
     margin: 4px 0;
 }
 
-/* Estilos para elementos de carga */
+/* Estilos para elementos de carga optimizados */
 .loading {
     position: relative;
     pointer-events: none;
@@ -477,4 +554,33 @@ input:checked + .slider:before {
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+/* Clase para cuando el mapa está en modo seguimiento */
+.tracking-active {
+    /* Reducir calidad durante el seguimiento para mejor rendimiento */
+}
+
+/* Mejorar rendimiento de capas del mapa */
+.leaflet-layer {
+    transform: translateZ(0);
+}
+
+.leaflet-overlay-pane {
+    transform: translateZ(0);
+}
+
+.leaflet-marker-pane {
+    transform: translateZ(0);
+}
+
+/* Optimizar para dispositivos táctiles */
+@media (hover: none) and (pointer: coarse) {
+    .button:hover {
+        transform: none;
+    }
+    
+    .trail-item:hover {
+        transform: none;
+    }
 }
