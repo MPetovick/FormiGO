@@ -1,61 +1,111 @@
-const CACHE_NAME = 'formigo-v1-alpha';
+const CACHE_NAME = 'formigo-v2.0';
 const urlsToCache = [
   '/',
   '/index.html',
   '/style.css',
   '/app.js',
-  '/icons/icon-72x72.png',
-  '/icons/icon-96x96.png',
-  '/icons/icon-128x128.png',
-  '/icons/icon-144x144.png',
-  '/icons/icon-152x152.png',
-  '/icons/icon-192x192.png',
-  '/icons/icon-384x384.png',
-  '/icons/icon-512x512.png'
+  '/icons/favicon.ico',
+  '/icons/favicon-96x96.png',
+  '/icons/web-app-manifest-192x192.png',
+  '/icons/web-app-manifest-512x512.png'
 ];
 
-// Install event
+// Install event - Mejorado con manejo de errores
 self.addEventListener('install', event => {
   console.log('Service Worker installing.');
-  // Perform install steps
+  // Evita esperar a que se completen todas las cachés para activarse
+  self.skipWaiting();
+  
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
+        console.log('Cache abierto');
+        // Agregar recursos con manejo de errores individual
+        return Promise.all(
+          urlsToCache.map(url => {
+            return cache.add(url).catch(err => {
+              console.log(`Error al cachear ${url}:`, err);
+            });
+          })
+        );
       })
   );
 });
 
-// Fetch event
+// Fetch event - Estrategia Cache First con actualización en background
 self.addEventListener('fetch', event => {
+  // Ignorar solicitudes que no son GET o de otro origen (como APIs)
+  if (event.request.method !== 'GET' || !event.request.url.startsWith(self.location.origin)) {
+    return;
+  }
+  
   event.respondWith(
     caches.match(event.request)
       .then(response => {
-        // Cache hit - return response
+        // Devuelve la respuesta en caché inmediatamente
         if (response) {
+          // Actualiza la caché en segundo plano
+          event.waitUntil(
+            fetch(event.request)
+              .then(networkResponse => {
+                if (networkResponse && networkResponse.status === 200) {
+                  caches.open(CACHE_NAME)
+                    .then(cache => cache.put(event.request, networkResponse));
+                }
+              })
+              .catch(() => { /* Ignorar errores de actualización */ })
+          );
           return response;
         }
-        return fetch(event.request);
-      }
-    )
+        
+        // Si no está en caché, haz la solicitud de red
+        return fetch(event.request)
+          .then(networkResponse => {
+            // Verifica si la respuesta es válida
+            if (!networkResponse || networkResponse.status !== 200) {
+              return networkResponse;
+            }
+            
+            // Clona la respuesta para guardarla en caché
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME)
+              .then(cache => {
+                cache.put(event.request, responseToCache);
+              });
+            
+            return networkResponse;
+          })
+          .catch(error => {
+            console.error('Error en fetch:', error);
+            // Podrías devolver una página de error personalizada aquí
+          });
+      })
   );
 });
 
-// Activate event
+// Activate event - Limpieza de cachés antiguas
 self.addEventListener('activate', event => {
   console.log('Service Worker activating.');
-  // Remove old caches
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (cacheName !== CACHE_NAME) {
-            console.log('Deleting old cache:', cacheName);
+            console.log('Eliminando caché antigua:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
+    }).then(() => {
+      // Tomar control de todas las pestañas inmediatamente
+      return self.clients.claim();
     })
   );
+});
+
+// Manejo de mensajes para actualizaciones
+self.addEventListener('message', event => {
+  if (event.data === 'skipWaiting') {
+    self.skipWaiting();
+  }
 });
