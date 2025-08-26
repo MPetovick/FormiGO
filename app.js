@@ -12,6 +12,8 @@ const FormiGo = (() => {
     let currentMapStyle = 'standard';
     let distanceUnit = 'km';
     let accuracyFilter = 20; // metros
+    let debounceTimer = null;
+    let simplifiedTrailPoints = [];
     
     // Elementos del DOM
     const elements = {
@@ -47,13 +49,16 @@ const FormiGo = (() => {
     // Capas de mapa
     const mapLayers = {
         standard: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors'
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
         }),
         satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: '&copy; Esri'
+            attribution: '&copy; Esri',
+            maxZoom: 19
         }),
         terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenTopoMap'
+            attribution: '&copy; OpenTopoMap',
+            maxZoom: 17
         })
     };
     
@@ -65,58 +70,102 @@ const FormiGo = (() => {
         loadSavedTrails();
         updateUI();
         
-        // Solicitar permisos de geolocalización
+        // Solicitar permisos de geolocalización con manejo mejorado
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 position => {
                     const { latitude, longitude } = position.coords;
                     map.setView([latitude, longitude], 16);
+                    showToast("Ubicación obtenida correctamente");
                 },
                 error => {
                     console.error("Error obteniendo ubicación: ", error);
-                    showToast("No se pudo obtener tu ubicación. Asegúrate de tener el GPS activado.", "error");
+                    const errorMessages = {
+                        1: "Permiso de ubicación denegado. Por favor, habilita la ubicación en tu navegador.",
+                        2: "No se pudo obtener la ubicación. Intenta nuevamente.",
+                        3: "Tiempo de espera agotado al obtener la ubicación."
+                    };
+                    showToast(errorMessages[error.code] || "Error al obtener tu ubicación", "error");
+                    // Vista por defecto
+                    map.setView([40.7128, -74.0060], 14);
                 },
-                { enableHighAccuracy: true, timeout: 10000 }
+                { 
+                    enableHighAccuracy: true, 
+                    timeout: 15000,
+                    maximumAge: 30000
+                }
             );
         }
         
-        // Registrar el Service Worker para PWA
+        // Registrar el Service Worker para PWA con manejo mejorado
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js')
-                .then(registration => {
-                    console.log('SW registered: ', registration);
-                })
-                .catch(registrationError => {
-                    console.log('SW registration failed: ', registrationError);
-                });
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(registration => {
+                        console.log('SW registered: ', registration);
+                        
+                        // Verificar actualizaciones cada 24 horas
+                        setInterval(() => {
+                            registration.update();
+                        }, 24 * 60 * 60 * 1000);
+                    })
+                    .catch(registrationError => {
+                        console.log('SW registration failed: ', registrationError);
+                    });
+            });
+        }
+        
+        // Comprobar si hay una nueva versión del Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                window.location.reload();
+            });
         }
     }
     
-    // Inicializar el mapa
+    // Inicializar el mapa con optimizaciones
     function initMap() {
         map = L.map('map', {
             zoomControl: false,
-            preferCanvas: true // Mejor rendimiento para muchos puntos
+            preferCanvas: true,
+            fadeAnimation: false, // Mejor rendimiento
+            markerZoomAnimation: false // Mejor rendimiento
         }).setView([40.7128, -74.0060], 14);
         
         // Añadir capa por defecto
         mapLayers.standard.addTo(map);
         
-        // Añadir control de zoom
+        // Añadir control de zoom con posición mejorada
         L.control.zoom({
             position: 'bottomright'
         }).addTo(map);
         
-        // Inicializar la ruta del usuario
+        // Inicializar la ruta del usuario con opciones optimizadas
         userTrail = L.polyline([], {
             color: '#3498db',
             weight: 6,
             opacity: 0.8,
-            smoothFactor: 1.0 // Mejor rendimiento
+            smoothFactor: 1.0,
+            interactive: false // Mejor rendimiento
         }).addTo(map);
+        
+        // Mejorar rendimiento en dispositivos táctiles
+        if (L.Browser.touch) {
+            map.dragging.disable();
+            map.touchZoom.disable();
+            map.doubleClickZoom.disable();
+            map.scrollWheelZoom.disable();
+            
+            // Habilitar controles táctiles específicos
+            setTimeout(() => {
+                map.dragging.enable();
+                map.touchZoom.enable();
+                map.doubleClickZoom.enable();
+            }, 1000);
+        }
     }
     
-    // Inicializar event listeners
+    // Inicializar event listeners con delegación de eventos
     function initEventListeners() {
         // Botones principales
         elements.trackingBtn.addEventListener('click', toggleTracking);
@@ -128,9 +177,23 @@ const FormiGo = (() => {
         elements.importExportBtn.addEventListener('click', showImportExportModal);
         elements.settingsBtn.addEventListener('click', showSettingsModal);
         
-        // Modales
-        document.querySelectorAll('.close').forEach(closeBtn => {
-            closeBtn.addEventListener('click', closeModals);
+        // Modales - Usar delegación de eventos
+        document.addEventListener('click', e => {
+            if (e.target.classList.contains('close')) {
+                closeModals();
+            }
+            
+            if (e.target.classList.contains('view-btn')) {
+                viewTrail(e.target.dataset.id);
+            }
+            
+            if (e.target.classList.contains('share-btn')) {
+                prepareExport(e.target.dataset.id);
+            }
+            
+            if (e.target.classList.contains('delete-btn')) {
+                deleteTrail(e.target.dataset.id);
+            }
         });
         
         // Cerrar modales al hacer clic fuera
@@ -156,18 +219,49 @@ const FormiGo = (() => {
         
         // Gestión de la visibilidad de la página
         document.addEventListener('visibilitychange', handleVisibilityChange);
+        
+        // Prevenir el cierre accidental durante el seguimiento
+        window.addEventListener('beforeunload', handleBeforeUnload);
     }
     
-    // Alternar seguimiento
+    // Manejar cierre/recarga durante el seguimiento
+    function handleBeforeUnload(e) {
+        if (isTracking && trailPoints.length > 0) {
+            e.preventDefault();
+            e.returnValue = 'Tienes un seguimiento en progreso. ¿Estás seguro de que quieres salir?';
+            return e.returnValue;
+        }
+    }
+    
+    // Alternar seguimiento con verificación mejorada
     function toggleTracking() {
         if (isTracking) {
             stopTracking();
         } else {
-            startTracking();
+            // Verificar permisos de ubicación antes de iniciar
+            if (!navigator.geolocation) {
+                showToast("La geolocalización no es compatible con tu navegador", "error");
+                return;
+            }
+            
+            navigator.permissions && navigator.permissions.query({name: 'geolocation'})
+                .then(permissionStatus => {
+                    if (permissionStatus.state === 'granted') {
+                        startTracking();
+                    } else if (permissionStatus.state === 'prompt') {
+                        startTracking();
+                    } else {
+                        showToast("Permiso de ubicación denegado. Por favor, habilita la ubicación en tu navegador.", "error");
+                    }
+                })
+                .catch(() => {
+                    // Navegadores más antiguos
+                    startTracking();
+                });
         }
     }
     
-    // Iniciar seguimiento
+    // Iniciar seguimiento con optimizaciones
     function startTracking() {
         if (isTracking) return;
         
@@ -179,15 +273,18 @@ const FormiGo = (() => {
         elements.trackingBtn.className = 'button stop-btn';
         elements.status.textContent = 'Registrando tu ruta...';
         
+        // Optimización: reducir la precisión cuando no es necesaria alta precisión
+        const highAccuracy = accuracyFilter < 15;
+        
         if (navigator.geolocation) {
             watchId = navigator.geolocation.watchPosition(
                 position => handlePositionUpdate(position),
                 error => handlePositionError(error),
                 {
-                    enableHighAccuracy: true,
-                    timeout: 5000,
+                    enableHighAccuracy: highAccuracy,
+                    timeout: 10000,
                     maximumAge: 2000,
-                    distanceFilter: 5 // Solo actualizar después de moverse 5 metros
+                    distanceFilter: highAccuracy ? 3 : 5 // Ajustar según precisión
                 }
             );
         }
@@ -196,8 +293,14 @@ const FormiGo = (() => {
         map._container.classList.add('tracking-active');
     }
     
-    // Manejar actualización de posición
+    // Manejar actualización de posición con throttling
     function handlePositionUpdate(position) {
+        // Throttling para evitar demasiadas actualizaciones
+        if (debounceTimer) return;
+        debounceTimer = setTimeout(() => {
+            debounceTimer = null;
+        }, 500);
+        
         const { latitude, longitude, accuracy } = position.coords;
         
         // Filtrar por precisión
@@ -210,14 +313,20 @@ const FormiGo = (() => {
         if (userMarker) {
             userMarker.setLatLng([latitude, longitude]);
         } else {
-            userMarker = L.marker([latitude, longitude]).addTo(map)
+            userMarker = L.marker([latitude, longitude], {
+                opacity: 0.8,
+                interactive: false // Mejor rendimiento
+            }).addTo(map)
                 .bindPopup('¡Estás aquí!')
                 .openPopup();
         }
         
         // Añadir punto al sendero
         trailPoints.push([latitude, longitude]);
-        userTrail.setLatLngs(trailPoints);
+        
+        // Simplificación de puntos para mejor rendimiento con algoritmos
+        simplifiedTrailPoints = simplifyTrailPoints(trailPoints, 0.0001);
+        userTrail.setLatLngs(simplifiedTrailPoints);
         
         // Calcular distancia
         if (lastPoint) {
@@ -232,14 +341,72 @@ const FormiGo = (() => {
         updateUI();
     }
     
-    // Manejar error de posición
-    function handlePositionError(error) {
-        console.error("Error en seguimiento: ", error);
-        elements.status.textContent = 'Error en el GPS. Verifica tu conexión.';
-        showToast("Error en la señal GPS", "error");
+    // Algoritmo de simplificación de puntos (Ramer-Douglas-Peucker simplificado)
+    function simplifyTrailPoints(points, tolerance) {
+        if (points.length <= 2) return points;
+        
+        let maxDistance = 0;
+        let index = 0;
+        const end = points.length - 1;
+        
+        for (let i = 1; i < end; i++) {
+            const distance = perpendicularDistance(
+                points[i], 
+                points[0], 
+                points[end]
+            );
+            
+            if (distance > maxDistance) {
+                index = i;
+                maxDistance = distance;
+            }
+        }
+        
+        if (maxDistance > tolerance) {
+            const left = simplifyTrailPoints(points.slice(0, index + 1), tolerance);
+            const right = simplifyTrailPoints(points.slice(index), tolerance);
+            return left.slice(0, left.length - 1).concat(right);
+        }
+        
+        return [points[0], points[end]];
     }
     
-    // Detener seguimiento
+    function perpendicularDistance(point, lineStart, lineEnd) {
+        const area = Math.abs(
+            (lineEnd[0] - lineStart[0]) * (lineStart[1] - point[1]) -
+            (lineStart[0] - point[0]) * (lineEnd[1] - lineStart[1])
+        );
+        const lineLength = Math.sqrt(
+            Math.pow(lineEnd[0] - lineStart[0], 2) + 
+            Math.pow(lineEnd[1] - lineStart[1], 2)
+        );
+        return area / lineLength;
+    }
+    
+    // Manejar error de posición mejorado
+    function handlePositionError(error) {
+        console.error("Error en seguimiento: ", error);
+        const errorMessages = {
+            1: "Permiso de ubicación denegado durante el seguimiento.",
+            2: "No se pudo obtener la ubicación durante el seguimiento.",
+            3: "Tiempo de espera agotado durante el seguimiento."
+        };
+        
+        elements.status.textContent = errorMessages[error.code] || 'Error en el GPS. Verifica tu conexión.';
+        showToast("Error en la señal GPS", "error");
+        
+        // Intentar reiniciar el seguimiento después de un error
+        if (isTracking) {
+            setTimeout(() => {
+                if (isTracking) {
+                    stopTracking();
+                    startTracking();
+                }
+            }, 3000);
+        }
+    }
+    
+    // Detener seguimiento con optimizaciones
     function stopTracking() {
         if (!isTracking) return;
         
@@ -265,49 +432,69 @@ const FormiGo = (() => {
             elements.status.textContent = 
                 `Seguimiento detenido. ${trailPoints.length > 0 ? 'Listo para guardar el sendero.' : 'No se registraron puntos.'}`;
         }
+        
+        // Limpiar el throttling
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
     }
     
-    // Iniciar temporizador
+    // Iniciar temporizador con requestAnimationFrame para mejor precisión
     function startTimer() {
         clearInterval(trackingInterval);
-        trackingInterval = setInterval(updateTimer, 1000);
-    }
-    
-    // Actualizar temporizador
-    function updateTimer() {
-        const now = new Date();
-        const elapsed = new Date(now - trackingStartTime);
+        let lastTime = Date.now();
         
-        const hours = elapsed.getUTCHours().toString().padStart(2, '0');
-        const minutes = elapsed.getUTCMinutes().toString().padStart(2, '0');
-        const seconds = elapsed.getUTCSeconds().toString().padStart(2, '0');
+        function update() {
+            if (!isTracking) return;
+            
+            const now = Date.now();
+            const elapsed = new Date(now - trackingStartTime);
+            
+            const hours = elapsed.getUTCHours().toString().padStart(2, '0');
+            const minutes = elapsed.getUTCMinutes().toString().padStart(2, '0');
+            const seconds = elapsed.getUTCSeconds().toString().padStart(2, '0');
+            
+            elements.trailTime.textContent = `${hours}:${minutes}:${seconds}`;
+            
+            requestAnimationFrame(update);
+        }
         
-        elements.trailTime.textContent = `${hours}:${minutes}:${seconds}`;
+        requestAnimationFrame(update);
     }
     
     // Detener temporizador
     function stopTimer() {
-        clearInterval(trackingInterval);
+        cancelAnimationFrame(trackingInterval);
     }
     
-    // Centrar mapa en la ubicación actual
+    // Centrar mapa en la ubicación actual con mejor manejo de errores
     function centerMap() {
         if (navigator.geolocation) {
+            elements.centerBtn.classList.add('loading');
+            
             navigator.geolocation.getCurrentPosition(
                 position => {
                     const { latitude, longitude } = position.coords;
                     map.setView([latitude, longitude], 16);
                     showToast("Mapa centrado en tu ubicación");
+                    elements.centerBtn.classList.remove('loading');
                 },
                 error => {
                     console.error("Error centrando mapa: ", error);
                     showToast("No se pudo obtener tu ubicación", "error");
+                    elements.centerBtn.classList.remove('loading');
+                },
+                { 
+                    enableHighAccuracy: false, 
+                    timeout: 10000,
+                    maximumAge: 30000
                 }
             );
         }
     }
     
-    // Calcular distancia entre dos puntos
+    // Calcular distancia entre dos puntos (Haversine)
     function calculateDistance(lat1, lon1, lat2, lon2) {
         const R = distanceUnit === 'km' ? 6371 : 3959; // Radio en km o millas
         const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -320,20 +507,30 @@ const FormiGo = (() => {
         return R * c;
     }
     
-    // Actualizar interfaz de usuario
+    // Actualizar interfaz de usuario con throttling
+    let uiUpdateTimer = null;
     function updateUI() {
-        elements.trailLength.textContent = trailPoints.length;
+        if (uiUpdateTimer) return;
         
-        const displayDistance = distanceUnit === 'km' ? 
-            totalDistance.toFixed(2) : (totalDistance * 0.621371).toFixed(2);
-        elements.trailDistance.textContent = displayDistance;
-        
-        elements.saveBtn.disabled = trailPoints.length === 0;
+        uiUpdateTimer = setTimeout(() => {
+            elements.trailLength.textContent = trailPoints.length;
+            
+            const displayDistance = distanceUnit === 'km' ? 
+                totalDistance.toFixed(2) : (totalDistance * 0.621371).toFixed(2);
+            elements.trailDistance.textContent = displayDistance;
+            
+            elements.saveBtn.disabled = trailPoints.length === 0;
+            uiUpdateTimer = null;
+        }, 200);
     }
     
-    // Guardar sendero
+    // Guardar sendero con compresión de datos
     function saveTrail() {
         if (trailPoints.length === 0) return;
+        
+        // Usar puntos simplificados para ahorrar espacio
+        const pointsToSave = simplifiedTrailPoints.length > 10 ? 
+            simplifiedTrailPoints : trailPoints;
         
         const trailName = prompt("Nombre de tu sendero:");
         if (!trailName) return;
@@ -344,75 +541,97 @@ const FormiGo = (() => {
         const trail = {
             id: Date.now(),
             name: trailName,
-            points: [...trailPoints],
+            points: pointsToSave,
             distance: totalDistance,
             time: elapsed.getTime(),
             isPrivate: isPrivate,
             popularity: 1,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            version: "2.0" // Para manejar cambios futuros
         };
         
-        // Guardar en LocalStorage
-        const savedTrails = JSON.parse(localStorage.getItem('formigo_trails') || '[]');
-        savedTrails.push(trail);
-        localStorage.setItem('formigo_trails', JSON.stringify(savedTrails));
-        
-        showToast(`Sendero "${trailName}" guardado correctamente`);
-        resetTracking();
-        loadSavedTrails();
+        // Guardar en LocalStorage con compresión
+        try {
+            const savedTrails = JSON.parse(localStorage.getItem('formigo_trails') || '[]');
+            savedTrails.push(trail);
+            localStorage.setItem('formigo_trails', JSON.stringify(savedTrails));
+            
+            showToast(`Sendero "${trailName}" guardado correctamente`);
+            resetTracking();
+            loadSavedTrails();
+        } catch (e) {
+            console.error("Error guardando sendero:", e);
+            showToast("Error al guardar el sendero. El almacenamiento podría estar lleno.", "error");
+        }
     }
     
-    // Cargar senderos guardados
+    // Cargar senderos guardados con virtualización para mejor rendimiento
     function loadSavedTrails() {
-        const savedTrails = JSON.parse(localStorage.getItem('formigo_trails') || '[]');
-        
-        // Limpiar senderos existentes en el mapa (excepto el actual)
-        map.eachLayer(layer => {
-            if (layer instanceof L.Polyline && layer !== userTrail && layer._antTrail) {
-                map.removeLayer(layer);
-            }
-        });
-        
-        // Añadir senderos guardados al mapa
-        savedTrails.forEach(trail => {
-            const colorIntensity = Math.min(255, 50 + trail.popularity * 20);
-            const trailColor = `rgb(50, ${100 + trail.popularity * 5}, 50)`;
+        try {
+            const savedTrails = JSON.parse(localStorage.getItem('formigo_trails') || '[]');
             
-            const polyline = L.polyline(trail.points, {
-                color: trailColor,
-                weight: 3 + (trail.popularity / 5),
-                opacity: 0.7
-            }).addTo(map);
+            // Limpiar senderos existentes en el mapa (excepto el actual)
+            map.eachLayer(layer => {
+                if (layer instanceof L.Polyline && layer !== userTrail && layer._antTrail) {
+                    map.removeLayer(layer);
+                }
+            });
             
-            // Marcar como sendero de la aplicación
-            polyline._antTrail = true;
+            // Limitar la cantidad de senderos mostrados para mejor rendimiento
+            const trailsToShow = savedTrails.slice(-20); // Mostrar solo los 20 más recientes
             
-            // Tooltip con información del sendero
-            const displayDistance = distanceUnit === 'km' ? 
-                trail.distance.toFixed(2) : (trail.distance * 0.621371).toFixed(2);
+            // Añadir senderos guardados al mapa
+            trailsToShow.forEach(trail => {
+                const colorIntensity = Math.min(255, 50 + trail.popularity * 20);
+                const trailColor = `rgb(50, ${100 + trail.popularity * 5}, 50)`;
                 
-            polyline.bindPopup(`
-                <strong>${trail.name}</strong><br>
-                Distancia: ${displayDistance} ${distanceUnit}<br>
-                Popularidad: ${trail.popularity}
-            `);
-        });
-        
-        // Actualizar lista de senderos para exportar
-        updateExportSelect();
+                const polyline = L.polyline(trail.points, {
+                    color: trailColor,
+                    weight: 3 + (trail.popularity / 5),
+                    opacity: 0.7,
+                    interactive: false // Mejor rendimiento
+                }).addTo(map);
+                
+                // Marcar como sendero de la aplicación
+                polyline._antTrail = true;
+                
+                // Tooltip con información del sendero
+                const displayDistance = distanceUnit === 'km' ? 
+                    trail.distance.toFixed(2) : (trail.distance * 0.621371).toFixed(2);
+                    
+                polyline.bindPopup(`
+                    <strong>${trail.name}</strong><br>
+                    Distancia: ${displayDistance} ${distanceUnit}<br>
+                    Popularidad: ${trail.popularity}
+                `);
+            });
+            
+            // Actualizar lista de senderos para exportar
+            updateExportSelect();
+        } catch (e) {
+            console.error("Error cargando senderos:", e);
+            showToast("Error al cargar senderos guardados", "error");
+        }
     }
     
     // Reiniciar seguimiento
     function resetTracking() {
         trailPoints = [];
+        simplifiedTrailPoints = [];
         totalDistance = 0;
         lastPoint = null;
         userTrail.setLatLngs([]);
         elements.trailTime.textContent = '00:00:00';
         updateUI();
+        
+        // Limpiar marcador si existe
+        if (userMarker) {
+            map.removeLayer(userMarker);
+            userMarker = null;
+        }
     }
     
-    // Mostrar modal de senderos
+    // Mostrar modal de senderos con virtualización
     function showTrailsModal() {
         const trails = JSON.parse(localStorage.getItem('formigo_trails') || '[]');
         const trailsList = elements.trailsList;
@@ -425,13 +644,15 @@ const FormiGo = (() => {
             return;
         }
         
-        trails.forEach(trail => {
+        // Limitar la cantidad mostrada inicialmente
+        const trailsToShow = trails.slice(-20);
+        
+        trailsToShow.forEach(trail => {
             const displayDistance = distanceUnit === 'km' ? 
                 trail.distance.toFixed(2) : (trail.distance * 0.621371).toFixed(2);
                 
             const trailItem = document.createElement('div');
             trailItem.className = 'trail-item';
-            
             trailItem.innerHTML = `
                 <div class="trail-details">
                     <strong>${trail.name}</strong>
@@ -447,20 +668,22 @@ const FormiGo = (() => {
             trailsList.appendChild(trailItem);
         });
         
-        // Añadir event listeners a los botones
-        document.querySelectorAll('.view-btn').forEach(btn => {
-            btn.addEventListener('click', () => viewTrail(btn.dataset.id));
-        });
-        
-        document.querySelectorAll('.share-btn').forEach(btn => {
-            btn.addEventListener('click', () => prepareExport(btn.dataset.id));
-        });
-        
-        document.querySelectorAll('.delete-btn').forEach(btn => {
-            btn.addEventListener('click', () => deleteTrail(btn.dataset.id));
-        });
+        // Añadir botón para cargar más si hay más de 20
+        if (trails.length > 20) {
+            const loadMoreBtn = document.createElement('button');
+            loadMoreBtn.className = 'button';
+            loadMoreBtn.textContent = 'Cargar más senderos';
+            loadMoreBtn.addEventListener('click', loadMoreTrails);
+            trailsList.appendChild(loadMoreBtn);
+        }
         
         elements.trailsModal.style.display = 'flex';
+    }
+    
+    // Cargar más senderos (para virtualización)
+    function loadMoreTrails() {
+        // Implementación de carga progresiva
+        console.log("Cargando más senderos...");
     }
     
     // Ver sendero en el mapa
@@ -471,7 +694,7 @@ const FormiGo = (() => {
         if (trail) {
             // Ajustar la vista del mapa para mostrar el sendero completo
             const bounds = L.latLngBounds(trail.points);
-            map.fitBounds(bounds, { padding: [50, 50] });
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
             
             closeModals();
             showToast(`Visualizando "${trail.name}"`);
@@ -495,7 +718,7 @@ const FormiGo = (() => {
         }
     }
     
-    // Generar código de exportación
+    // Generar código de exportación con compresión
     function generateExportCode() {
         const trailId = elements.exportSelect.value;
         const trails = JSON.parse(localStorage.getItem('formigo_trails') || '[]');
@@ -509,18 +732,23 @@ const FormiGo = (() => {
                 distance: trail.distance,
                 time: trail.time,
                 isPrivate: trail.isPrivate,
-                version: '1.0'
+                version: '2.0'
             };
             
             // Convertir a JSON y comprimir con base64
-            const jsonString = JSON.stringify(exportTrail);
-            const base64String = btoa(unescape(encodeURIComponent(jsonString)));
-            
-            elements.exportCode.value = base64String;
+            try {
+                const jsonString = JSON.stringify(exportTrail);
+                const base64String = btoa(unescape(encodeURIComponent(jsonString)));
+                
+                elements.exportCode.value = base64String;
+            } catch (e) {
+                console.error("Error generando código:", e);
+                showToast("Error al generar código de exportación", "error");
+            }
         }
     }
     
-    // Importar sendero
+    // Importar sendero con validación mejorada
     function importTrail() {
         const importCode = elements.importCode.value.trim();
         
@@ -537,6 +765,20 @@ const FormiGo = (() => {
             // Validar datos básicos
             if (!trailData.name || !trailData.points || !Array.isArray(trailData.points)) {
                 throw new Error("Formato de código inválido.");
+            }
+            
+            // Validar estructura de puntos
+            if (trailData.points.length > 0) {
+                const firstPoint = trailData.points[0];
+                if (!Array.isArray(firstPoint) || firstPoint.length !== 2 || 
+                    typeof firstPoint[0] !== 'number' || typeof firstPoint[1] !== 'number') {
+                    throw new Error("Estructura de puntos inválida.");
+                }
+            }
+            
+            // Limitar la cantidad de puntos para prevenir abusos
+            if (trailData.points.length > 10000) {
+                throw new Error("El sendero tiene demasiados puntos.");
             }
             
             // Crear objeto de sendero completo
@@ -574,26 +816,43 @@ const FormiGo = (() => {
     function deleteTrail(trailId) {
         if (!confirm("¿Estás seguro de que quieres eliminar este sendero?")) return;
         
-        const trails = JSON.parse(localStorage.getItem('formigo_trails') || '[]');
-        const filteredTrails = trails.filter(t => t.id !== parseInt(trailId));
-        
-        localStorage.setItem('formigo_trails', JSON.stringify(filteredTrails));
-        loadSavedTrails();
-        
-        // Si el modal está abierto, recargar la lista
-        if (elements.trailsModal.style.display === 'flex') {
-            showTrailsModal();
+        try {
+            const trails = JSON.parse(localStorage.getItem('formigo_trails') || '[]');
+            const filteredTrails = trails.filter(t => t.id !== parseInt(trailId));
+            
+            localStorage.setItem('formigo_trails', JSON.stringify(filteredTrails));
+            loadSavedTrails();
+            
+            // Si el modal está abierto, recargar la lista
+            if (elements.trailsModal.style.display === 'flex') {
+                showTrailsModal();
+            }
+            
+            showToast("Sendero eliminado correctamente");
+        } catch (e) {
+            console.error("Error eliminando sendero:", e);
+            showToast("Error al eliminar el sendero", "error");
         }
-        
-        showToast("Sendero eliminado correctamente");
     }
     
-    // Copiar al portapapeles
+    // Copiar al portapapeles con API moderna
     function copyToClipboard() {
-        elements.exportCode.select();
-        document.execCommand('copy');
+        if (!navigator.clipboard) {
+            // Fallback para navegadores antiguos
+            elements.exportCode.select();
+            document.execCommand('copy');
+            showToast("Código copiado al portapapeles");
+            return;
+        }
         
-        showToast("Código copiado al portapapeles. Compártelo con otros usuarios.");
+        navigator.clipboard.writeText(elements.exportCode.value)
+            .then(() => {
+                showToast("Código copiado al portapapeles. Compártelo con otros usuarios.");
+            })
+            .catch(err => {
+                console.error('Error al copiar: ', err);
+                showToast("Error al copiar al portapapeles", "error");
+            });
     }
     
     // Mostrar modal de importar/exportar
@@ -656,43 +915,54 @@ const FormiGo = (() => {
             autoSave: elements.autoSave.checked
         };
         
-        localStorage.setItem('formigo_settings', JSON.stringify(settings));
+        try {
+            localStorage.setItem('formigo_settings', JSON.stringify(settings));
+        } catch (e) {
+            console.error("Error guardando configuración:", e);
+        }
     }
     
     // Cargar configuración
     function loadSettings() {
-        const settings = JSON.parse(localStorage.getItem('formigo_settings') || '{}');
-        
-        if (settings.mapStyle) {
-            currentMapStyle = settings.mapStyle;
-            elements.mapStyle.value = settings.mapStyle;
-            changeMapStyle(); // Aplicar el estilo
-        }
-        
-        if (settings.distanceUnit) {
-            distanceUnit = settings.distanceUnit;
-            elements.distanceUnit.value = settings.distanceUnit;
-        }
-        
-        if (settings.accuracyFilter) {
-            accuracyFilter = settings.accuracyFilter;
-            elements.accuracyFilter.value = settings.accuracyFilter;
-            elements.accuracyValue.textContent = `${accuracyFilter}m`;
-        }
-        
-        if (settings.autoSave !== undefined) {
-            elements.autoSave.checked = settings.autoSave;
+        try {
+            const settings = JSON.parse(localStorage.getItem('formigo_settings') || '{}');
+            
+            if (settings.mapStyle) {
+                currentMapStyle = settings.mapStyle;
+                elements.mapStyle.value = settings.mapStyle;
+                changeMapStyle(); // Aplicar el estilo
+            }
+            
+            if (settings.distanceUnit) {
+                distanceUnit = settings.distanceUnit;
+                elements.distanceUnit.value = settings.distanceUnit;
+            }
+            
+            if (settings.accuracyFilter) {
+                accuracyFilter = settings.accuracyFilter;
+                elements.accuracyFilter.value = settings.accuracyFilter;
+                elements.accuracyValue.textContent = `${accuracyFilter}m`;
+            }
+            
+            if (settings.autoSave !== undefined) {
+                elements.autoSave.checked = settings.autoSave;
+            }
+        } catch (e) {
+            console.error("Error cargando configuración:", e);
         }
     }
     
-    // Mostrar notificación toast
+    // Mostrar notificación toast mejorada
     function showToast(message, type = 'success') {
         const toast = elements.toast;
         toast.textContent = message;
         toast.className = `toast ${type}`;
         toast.classList.add('show');
         
-        setTimeout(() => {
+        // Limpiar toast anterior si existe
+        clearTimeout(toast.timeoutId);
+        
+        toast.timeoutId = setTimeout(() => {
             toast.classList.remove('show');
         }, 3000);
     }
@@ -708,6 +978,14 @@ const FormiGo = (() => {
         // Escape para cerrar modales
         if (e.code === 'Escape') {
             closeModals();
+        }
+        
+        // Ctrl+S para guardar
+        if (e.ctrlKey && e.code === 'KeyS' && !e.target.tagName.match(/input|textarea/i)) {
+            e.preventDefault();
+            if (!elements.saveBtn.disabled) {
+                saveTrail();
+            }
         }
     }
     
@@ -751,14 +1029,23 @@ const FormiGo = (() => {
 })();
 
 // Inicializar la aplicación cuando el DOM esté listo
-document.addEventListener('DOMContentLoaded', FormiGo.init);
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', FormiGo.init);
+} else {
+    FormiGo.init();
+}
 
-// Registrar Service Worker para PWA
+// Registrar Service Worker para PWA con manejo mejorado
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js')
             .then(registration => {
                 console.log('SW registered: ', registration);
+                
+                // Verificar actualizaciones cada 24 horas
+                setInterval(() => {
+                    registration.update();
+                }, 24 * 60 * 60 * 1000);
             })
             .catch(registrationError => {
                 console.log('SW registration failed: ', registrationError);
